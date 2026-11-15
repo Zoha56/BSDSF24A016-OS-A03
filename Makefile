@@ -1,25 +1,22 @@
-CC      = gcc
-CFLAGS  = -Wall -Wextra -g -Iinclude
-LDFLAGS =
-
+CC = gcc
+CFLAGS = -Wall -Wextra -g -Iinclude
 SRC_DIR = src
 OBJ_DIR = obj
 BIN_DIR = bin
-TARGET  = $(BIN_DIR)/myshell
 
-SRCS = $(wildcard $(SRC_DIR)/*.c)
-OBJS = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
+SRCS = $(SRC_DIR)/main.c $(SRC_DIR)/shell.c $(SRC_DIR)/execute.c
+OBJS = $(OBJ_DIR)/main.o $(OBJ_DIR)/shell.o $(OBJ_DIR)/execute.o
+TARGET = $(BIN_DIR)/myshell
 
 all: $(TARGET)
 
-$(TARGET): $(OBJS) | $(BIN_DIR)
-	$(CC) $(OBJS) -o $@ $(LDFLAGS)
+$(TARGET): $(OBJS)
+	@mkdir -p $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
-
-$(OBJ_DIR) $(BIN_DIR):
-	mkdir -p $@
 
 clean:
 	rm -rf $(OBJ_DIR) $(BIN_DIR)

@@ -60,3 +60,43 @@ char** tokenize(char* cmdline) {
     arglist[argnum] = NULL;
     return arglist;
 }
+
+int handle_builtin(char** arglist) {
+    if (arglist == NULL || arglist[0] == NULL) {
+        return 0;
+    }
+
+    if (strcmp(arglist[0], "exit") == 0) {
+        exit(0);
+    }
+
+    if (strcmp(arglist[0], "cd") == 0) {
+        if (arglist[1] == NULL) {
+            char* home = getenv("HOME");
+            if (home == NULL || chdir(home) != 0) {
+                perror("cd");
+            }
+        } else {
+            if (chdir(arglist[1]) != 0) {
+                perror("cd");
+            }
+        }
+        return 1;
+    }
+
+    if (strcmp(arglist[0], "help") == 0) {
+        printf("MyShell Built-in Commands:\n");
+        printf("  cd <dir>  - Change the current working directory\n");
+        printf("  exit      - Terminate the shell gracefully\n");
+        printf("  help      - Display this help message\n");
+        printf("  jobs      - List active background jobs\n");
+        return 1;
+    }
+
+    if (strcmp(arglist[0], "jobs") == 0) {
+        printf("Job control not yet implemented.\n");
+        return 1;
+    }
+
+    return 0;
+}
