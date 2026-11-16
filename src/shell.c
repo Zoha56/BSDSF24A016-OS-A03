@@ -1,5 +1,45 @@
 #include "shell.h"
 
+static char* history[HISTORY_SIZE];
+static int history_count = 0;
+
+void add_to_history(const char* cmd) {
+    if (cmd == NULL || cmd[0] == '\0') return;
+
+    // Ignore lines that contain only whitespace
+    int only_space = 1;
+    for (int i = 0; cmd[i] != '\0'; i++) {
+        if (cmd[i] != ' ' && cmd[i] != '\t' && cmd[i] != '\n') {
+            only_space = 0;
+            break;
+        }
+    }
+    if (only_space) return;
+
+    if (history_count < HISTORY_SIZE) {
+        history[history_count++] = strdup(cmd);
+    } else {
+        free(history[0]);
+        for (int i = 1; i < HISTORY_SIZE; i++) {
+            history[i - 1] = history[i];
+        }
+        history[HISTORY_SIZE - 1] = strdup(cmd);
+    }
+}
+
+void print_history(void) {
+    for (int i = 0; i < history_count; i++) {
+        printf("%d  %s\n", i + 1, history[i]);
+    }
+}
+
+const char* get_history_cmd(int index) {
+    if (index < 1 || index > history_count) {
+        return NULL;
+    }
+    return history[index - 1];
+}
+
 char* read_cmd(char* prompt, FILE* fp) {
     printf("%s", prompt);
     char* cmdline = (char*) malloc(sizeof(char) * MAX_LEN);
@@ -90,11 +130,17 @@ int handle_builtin(char** arglist) {
         printf("  exit      - Terminate the shell gracefully\n");
         printf("  help      - Display this help message\n");
         printf("  jobs      - List active background jobs\n");
+        printf("  history   - Display command history\n");
         return 1;
     }
 
     if (strcmp(arglist[0], "jobs") == 0) {
         printf("Job control not yet implemented.\n");
+        return 1;
+    }
+
+    if (strcmp(arglist[0], "history") == 0) {
+        print_history();
         return 1;
     }
 
