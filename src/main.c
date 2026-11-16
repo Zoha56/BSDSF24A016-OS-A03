@@ -4,8 +4,11 @@ int main() {
     char* cmdline;
     char** arglist;
 
-    while ((cmdline = read_cmd(PROMPT, stdin)) != NULL) {
-        // Task 4: Handle !n before tokenization or adding to history
+    // Enable default Readline filename/command tab completion
+    rl_bind_key('\t', rl_complete);
+
+    while ((cmdline = readline(PROMPT)) != NULL) {
+        // Handle !n before tokenization or adding to history
         char* p = cmdline;
         while (*p == ' ' || *p == '\t') p++;
 
@@ -32,8 +35,11 @@ int main() {
             cmdline = strdup(hist_cmd);
         }
 
-        // Task 2: Add command to history
-        add_to_history(cmdline);
+        // Save non-empty command to both Readline history (Up/Down arrows) and custom history
+        if (*p != '\0') {
+            add_history(cmdline);
+            add_to_history(cmdline);
+        }
 
         if ((arglist = tokenize(cmdline)) != NULL) {
             if (!handle_builtin(arglist)) {
