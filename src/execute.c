@@ -54,7 +54,6 @@ static int parse_segment(char* seg, char** argv, char** infile, char** outfile) 
                 *outfile = fname;
             }
         } else {
-            char* start = p;
             char quote = 0;
             char buf[MAX_LEN];
             int bpos = 0;
@@ -77,7 +76,6 @@ static int parse_segment(char* seg, char** argv, char** infile, char** outfile) 
                     }
                 }
             }
-            (void)start;
             buf[bpos] = '\0';
             if (argc < MAXARGS) {
                 argv[argc++] = strdup(buf);
@@ -128,6 +126,30 @@ static void apply_redirections(const char* infile, const char* outfile) {
 
 int execute_command_line(char* cmdline) {
     if (cmdline == NULL) return 0;
+
+    // Trim leading whitespace
+    while (*cmdline == ' ' || *cmdline == '\t') cmdline++;
+    if (*cmdline == '\0') return 0;
+
+    // Save clean command string for background job display
+    char job_cmd[MAX_LEN];
+    strncpy(job_cmd, cmdline, MAX_LEN - 1);
+    job_cmd[MAX_LEN - 1] = '\0';
+
+    // Check for trailing '&' (background execution)
+    int background = 0;
+    int len = strlen(cmdline);
+    while (len > 0 && (cmdline[len - 1] == ' ' || cmdline[len - 1] == '\t')) {
+        cmdline[--len] = '\0';
+    }
+    if (len > 0 && cmdline[len - 1] == '&') {
+        background = 1;
+        cmdline[--len] = '\0';
+        while (len > 0 && (cmdline[len - 1] == ' ' || cmdline[len - 1] == '\t')) {
+            cmdline[--len] = '\0';
+        }
+    }
+    if (cmdline[0] == '\0') return 0;
 
     // Check if there is a pipe '|' outside quotes
     char* pipe_pos = NULL;
@@ -187,7 +209,7 @@ int execute_command_line(char* cmdline) {
             return -1;
         }
         if (pid1 == 0) {
-            close(pipefd[0]); // Close unused read end
+            close(pipefd[0]);
             if (dup2(pipefd[1], STDOUT_FILENO) < 0) {
                 perror("dup2");
                 exit(1);
@@ -208,13 +230,13 @@ int execute_command_line(char* cmdline) {
             perror("fork");
             close(pipefd[0]);
             close(pipefd[1]);
-            waitpid(pid1, NULL, 0);
+            if (!background) waitpid(pid1, NULL, 0);
             free_segment(left_argv, left_in, left_out);
             free_segment(right_argv, right_in, right_out);
             return -1;
         }
         if (pid2 == 0) {
-            close(pipefd[1]); // Close unused write end
+            close(pipefd[1]);
             if (dup2(pipefd[0], STDIN_FILENO) < 0) {
                 perror("dup2");
                 exit(1);
@@ -229,18 +251,22 @@ int execute_command_line(char* cmdline) {
             exit(1);
         }
 
-        // Parent closes both pipe ends and waits for both children
         close(pipefd[0]);
         close(pipefd[1]);
-        waitpid(pid1, NULL, 0);
-        waitpid(pid2, NULL, 0);
+
+        if (background) {
+            add_job(pid2, job_cmd);
+        } else {
+            waitpid(pid1, NULL, 0);
+            waitpid(pid2, NULL, 0);
+        }
 
         free_segment(left_argv, left_in, left_out);
         free_segment(right_argv, right_in, right_out);
         return 0;
     }
 
-    // Case 2: Single command with < or > redirection
+    // Case 2: Single command (with optional <, >, or &)
     char* argv[MAXARGS + 1];
     char* infile = NULL;
     char* outfile = NULL;
@@ -251,8 +277,8 @@ int execute_command_line(char* cmdline) {
         return 0;
     }
 
-    // If no redirection is present, preserve exact original flow
-    if (infile == NULL && outfile == NULL) {
+    // Foreground command without redirection: preserve exact original flow
+    if (!background && infile == NULL && outfile == NULL) {
         if (!handle_builtin(argv)) {
             execute(argv);
         }
@@ -260,7 +286,7 @@ int execute_command_line(char* cmdline) {
         return 0;
     }
 
-    // Redirection is present: fork child, set up file descriptors, and execute
+    // Background command or command with redirection
     pid_t cpid = fork();
     if (cpid < 0) {
         perror("fork failed");
@@ -277,7 +303,40 @@ int execute_command_line(char* cmdline) {
         exit(1);
     }
 
-    waitpid(cpid, NULL, 0);
+    if (background) {
+        add_job(cpid, job_cmd);
+    } else {
+        waitpid(cpid, NULL, 0);
+    }
+
     free_segment(argv, infile, outfile);
     return 0;
+}
+
+// Split input line by ';' (outside quotes) and execute sequentially
+void execute_chained_commands(char* cmdline) {
+    if (cmdline == NULL) return;
+
+    char* start = cmdline;
+    char quote = 0;
+
+    for (char* p = cmdline; ; p++) {
+        if (quote) {
+            if (*p == quote) quote = 0;
+            if (*p == '\0') {
+                execute_command_line(start);
+                break;
+            }
+        } else {
+            if (*p == '"' || *p == '\'') {
+                quote = *p;
+            } else if (*p == ';' || *p == '\0') {
+                char saved = *p;
+                *p = '\0';
+                execute_command_line(start);
+                if (saved == '\0') break;
+                start = p + 1;
+            }
+        }
+    }
 }

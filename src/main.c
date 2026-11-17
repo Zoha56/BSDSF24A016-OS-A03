@@ -6,7 +6,15 @@ int main() {
     // Enable default Readline filename/command tab completion
     rl_bind_key('\t', rl_complete);
 
-    while ((cmdline = readline(PROMPT)) != NULL) {
+    while (1) {
+        // Reap any finished background processes before prompting
+        reap_zombies();
+
+        cmdline = readline(PROMPT);
+        if (cmdline == NULL) {
+            break;
+        }
+
         // Handle !n before tokenization or adding to history
         char* p = cmdline;
         while (*p == ' ' || *p == '\t') p++;
@@ -40,8 +48,8 @@ int main() {
             add_to_history(cmdline);
         }
 
-        // Execute command with support for I/O redirection (<, >) and pipes (|)
-        execute_command_line(cmdline);
+        // Execute chained (;), background (&), redirected (<, >), or piped (|) commands
+        execute_chained_commands(cmdline);
 
         free(cmdline);
     }

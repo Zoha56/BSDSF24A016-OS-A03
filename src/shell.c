@@ -3,6 +3,74 @@
 static char* history[HISTORY_SIZE];
 static int history_count = 0;
 
+typedef struct {
+    int id;
+    pid_t pid;
+    char cmd[MAX_LEN];
+    int active;
+} Job;
+
+static Job jobs_list[MAX_JOBS];
+static int next_job_id = 1;
+
+void add_job(pid_t pid, const char* cmd) {
+    for (int i = 0; i < MAX_JOBS; i++) {
+        if (!jobs_list[i].active) {
+            jobs_list[i].id = next_job_id++;
+            jobs_list[i].pid = pid;
+            strncpy(jobs_list[i].cmd, cmd, MAX_LEN - 1);
+            jobs_list[i].cmd[MAX_LEN - 1] = '\0';
+            jobs_list[i].active = 1;
+            printf("[%d] %d\n", jobs_list[i].id, pid);
+            return;
+        }
+    }
+    fprintf(stderr, "Maximum background jobs limit reached.\n");
+}
+
+void remove_job(pid_t pid) {
+    for (int i = 0; i < MAX_JOBS; i++) {
+        if (jobs_list[i].active && jobs_list[i].pid == pid) {
+            jobs_list[i].active = 0;
+            break;
+        }
+    }
+    // Reset job numbering if no active jobs remain
+    int any_active = 0;
+    for (int i = 0; i < MAX_JOBS; i++) {
+        if (jobs_list[i].active) {
+            any_active = 1;
+            break;
+        }
+    }
+    if (!any_active) {
+        next_job_id = 1;
+    }
+}
+
+void reap_zombies(void) {
+    int status;
+    pid_t pid;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        remove_job(pid);
+    }
+}
+
+void print_jobs(void) {
+    reap_zombies();
+    int found = 0;
+    for (int i = 0; i < MAX_JOBS; i++) {
+        if (jobs_list[i].active) {
+            printf("[%d]  Running                 %s (PID: %d)\n",
+                   jobs_list[i].id, jobs_list[i].cmd, jobs_list[i].pid);
+            found = 1;
+        }
+    }
+    if (!found) {
+        printf("No active background jobs.\n");
+    }
+}
+
 void add_to_history(const char* cmd) {
     if (cmd == NULL || cmd[0] == '\0') return;
 
@@ -64,7 +132,7 @@ char** tokenize(char* cmdline) {
 
         start = cp;
         len = 1;
-        while (*++cp != '\0' && !(*cp == ' ' || *cp == '	')) {
+        while (*++cp != '\0' && !(*cp == ' ' || *cp == '\t')) {
             len++;
         }
         strncpy(arglist[argnum], start, len);
@@ -116,7 +184,7 @@ int handle_builtin(char** arglist) {
     }
 
     if (strcmp(arglist[0], "jobs") == 0) {
-        printf("Job control not yet implemented.\n");
+        print_jobs();
         return 1;
     }
 
