@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 #include <errno.h>
 #include <readline/readline.h>
 #include <readline/history.h>
@@ -20,6 +21,7 @@
 // Function prototypes
 char** tokenize(char* cmdline);
 int execute(char** arglist);
+int execute_command_line(char* cmdline);
 int handle_builtin(char** arglist);
 void add_to_history(const char* cmd);
 void print_history(void);

@@ -2,7 +2,6 @@
 
 int main() {
     char* cmdline;
-    char** arglist;
 
     // Enable default Readline filename/command tab completion
     rl_bind_key('\t', rl_complete);
@@ -35,23 +34,15 @@ int main() {
             cmdline = strdup(hist_cmd);
         }
 
-        // Save non-empty command to both Readline history (Up/Down arrows) and custom history
+        // Save non-empty command to both Readline history and custom history
         if (*p != '\0') {
             add_history(cmdline);
             add_to_history(cmdline);
         }
 
-        if ((arglist = tokenize(cmdline)) != NULL) {
-            if (!handle_builtin(arglist)) {
-                execute(arglist);
-            }
+        // Execute command with support for I/O redirection (<, >) and pipes (|)
+        execute_command_line(cmdline);
 
-            // Free the memory allocated by tokenize()
-            for (int i = 0; arglist[i] != NULL; i++) {
-                free(arglist[i]);
-            }
-            free(arglist);
-        }
         free(cmdline);
     }
 
