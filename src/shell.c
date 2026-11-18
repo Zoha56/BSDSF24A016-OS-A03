@@ -313,7 +313,7 @@ int handle_builtin(char** arglist) {
         printf("  exit        - Terminate the shell gracefully\n");
         printf("  help        - Display this help message\n");
         printf("  jobs        - List active background jobs\n");
-        printf("  history     - Display command history\n");
+        printf("  history     - Display command history (use !n to re-execute) (use !n to re-execute)\n");
         printf("  set         - Display all defined shell variables\n");
         printf("  VAR=VALUE   - Assign a value to a shell variable\n");
         return 1;
