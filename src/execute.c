@@ -22,6 +22,7 @@ int execute(char* arglist[]) {
 }
 
 // Helper: Split a single command segment into argv, input_file (<), and output_file (>)
+// Also performs Feature 8 variable expansion ($VARNAME) on arguments and filenames
 static int parse_segment(char* seg, char** argv, char** infile, char** outfile) {
     *infile = NULL;
     *outfile = NULL;
@@ -44,9 +45,12 @@ static int parse_segment(char* seg, char** argv, char** infile, char** outfile) 
                 p++;
             }
             int len = p - start;
-            char* fname = (char*)malloc(len + 1);
-            strncpy(fname, start, len);
-            fname[len] = '\0';
+            char* raw_fname = (char*)malloc(len + 1);
+            strncpy(raw_fname, start, len);
+            raw_fname[len] = '\0';
+
+            char* fname = expand_variables_in_str(raw_fname);
+            free(raw_fname);
 
             if (op == '<') {
                 free(*infile);
@@ -59,6 +63,7 @@ static int parse_segment(char* seg, char** argv, char** infile, char** outfile) 
             char quote = 0;
             char buf[MAX_LEN];
             int bpos = 0;
+            int has_single_quote = 0;
 
             while (*p != '\0') {
                 if (quote) {
@@ -70,6 +75,7 @@ static int parse_segment(char* seg, char** argv, char** infile, char** outfile) 
                     }
                 } else {
                     if (*p == '"' || *p == '\'') {
+                        if (*p == '\'') has_single_quote = 1;
                         quote = *p++;
                     } else if (*p == ' ' || *p == '\t' || *p == '<' || *p == '>') {
                         break;
@@ -80,7 +86,12 @@ static int parse_segment(char* seg, char** argv, char** infile, char** outfile) 
             }
             buf[bpos] = '\0';
             if (argc < MAXARGS) {
-                argv[argc++] = strdup(buf);
+                // Do not expand variables inside single quotes (e.g. '$VAR')
+                if (has_single_quote) {
+                    argv[argc++] = strdup(buf);
+                } else {
+                    argv[argc++] = expand_variables_in_str(buf);
+                }
             }
         }
     }
@@ -272,7 +283,7 @@ int execute_command_line(char* cmdline) {
         return ret_status;
     }
 
-    // Case 2: Single command (with optional <, >, or &)
+    // Case 2: Single command (with optional <, >, &, or VAR=val)
     char* argv[MAXARGS + 1];
     char* infile = NULL;
     char* outfile = NULL;
@@ -382,17 +393,14 @@ int handle_if_block(char* first_line) {
     int then_count = 0;
     int else_count = 0;
 
-    // States: 0 = reading condition (waiting for 'then'), 1 = reading 'then' block, 2 = reading 'else' block
     int state = 0;
 
-    // Extract condition after "if" on the first line
     char* after_if = trim_ws(p + 2);
     if (*after_if != '\0') {
         strncpy(cond_cmd, after_if, MAX_LEN - 1);
         cond_cmd[MAX_LEN - 1] = '\0';
     }
 
-    // Read subsequent lines until 'fi'
     while (1) {
         char* line = readline("> ");
         if (line == NULL) {
@@ -402,13 +410,11 @@ int handle_if_block(char* first_line) {
             return 1;
         }
 
-        // Save each entered line to Readline history
         char* trimmed = trim_ws(line);
         if (*trimmed != '\0') {
             add_history(line);
         }
 
-        // Skip empty lines or comments
         if (*trimmed == '\0' || *trimmed == '#') {
             free(line);
             continue;
@@ -451,11 +457,10 @@ int handle_if_block(char* first_line) {
     if (cond_cmd[0] == '\0') {
         fprintf(stderr, "Syntax error: missing condition in `if' statement\n");
         for (int i = 0; i < then_count; i++) free(then_cmds[i]);
-        for (int i = 0; i < else_count; i++) free(else_cmds[i]);
+        for (int i = 0; i < else_count; i++) free(else_count ? else_cmds[i] : NULL);
         return 1;
     }
 
-    // Execute the condition command and inspect its exit status
     int exit_status = execute_command_line(cond_cmd);
 
     if (exit_status == 0) {

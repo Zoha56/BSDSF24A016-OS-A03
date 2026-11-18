@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <ctype.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 
@@ -34,5 +35,12 @@ void add_job(pid_t pid, const char* cmd);
 void remove_job(pid_t pid);
 void reap_zombies(void);
 void print_jobs(void);
+
+// Feature 8: Shell Variables
+void set_shell_var(const char* name, const char* value);
+const char* get_shell_var(const char* name);
+void print_shell_vars(void);
+int try_variable_assignment(const char* token);
+char* expand_variables_in_str(const char* str);
 
 #endif // SHELL_H
