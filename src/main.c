@@ -40,6 +40,8 @@ int main() {
             printf("%s\n", hist_cmd);
             free(cmdline);
             cmdline = strdup(hist_cmd);
+            p = cmdline;
+            while (*p == ' ' || *p == '\t') p++;
         }
 
         // Save non-empty command to both Readline history and custom history
@@ -48,8 +50,11 @@ int main() {
             add_to_history(cmdline);
         }
 
-        // Execute chained (;), background (&), redirected (<, >), or piped (|) commands
-        execute_chained_commands(cmdline);
+        // Feature 7: Handle multi-line if-then-else-fi structure if line starts with 'if'
+        if (!handle_if_block(cmdline)) {
+            // Execute chained (;), background (&), redirected (<, >), or piped (|) commands
+            execute_chained_commands(cmdline);
+        }
 
         free(cmdline);
     }

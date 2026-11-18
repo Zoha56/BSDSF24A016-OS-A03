@@ -14,8 +14,10 @@ int execute(char* arglist[]) {
             exit(1);
         default: // Parent process
             waitpid(cpid, &status, 0);
-            // printf("Child pid:%d exited with status %d\n", cpid, status >> 8);
-            return 0;
+            if (WIFEXITED(status)) {
+                return WEXITSTATUS(status);
+            }
+            return 1;
     }
 }
 
@@ -129,7 +131,7 @@ int execute_command_line(char* cmdline) {
 
     // Trim leading whitespace
     while (*cmdline == ' ' || *cmdline == '\t') cmdline++;
-    if (*cmdline == '\0') return 0;
+    if (*cmdline == '\0' || *cmdline == '#') return 0;
 
     // Save clean command string for background job display
     char job_cmd[MAX_LEN];
@@ -187,7 +189,7 @@ int execute_command_line(char* cmdline) {
             if (l_argc >= 0) free_segment(left_argv, left_in, left_out);
             if (r_argc >= 0) free_segment(right_argv, right_in, right_out);
             fprintf(stderr, "Invalid null command in pipe\n");
-            return -1;
+            return 1;
         }
 
         int pipefd[2];
@@ -195,7 +197,7 @@ int execute_command_line(char* cmdline) {
             perror("pipe");
             free_segment(left_argv, left_in, left_out);
             free_segment(right_argv, right_in, right_out);
-            return -1;
+            return 1;
         }
 
         // Left child (writer)
@@ -206,7 +208,7 @@ int execute_command_line(char* cmdline) {
             close(pipefd[1]);
             free_segment(left_argv, left_in, left_out);
             free_segment(right_argv, right_in, right_out);
-            return -1;
+            return 1;
         }
         if (pid1 == 0) {
             close(pipefd[0]);
@@ -233,7 +235,7 @@ int execute_command_line(char* cmdline) {
             if (!background) waitpid(pid1, NULL, 0);
             free_segment(left_argv, left_in, left_out);
             free_segment(right_argv, right_in, right_out);
-            return -1;
+            return 1;
         }
         if (pid2 == 0) {
             close(pipefd[1]);
@@ -254,16 +256,20 @@ int execute_command_line(char* cmdline) {
         close(pipefd[0]);
         close(pipefd[1]);
 
+        int ret_status = 0;
         if (background) {
             add_job(pid2, job_cmd);
         } else {
+            int st2;
             waitpid(pid1, NULL, 0);
-            waitpid(pid2, NULL, 0);
+            waitpid(pid2, &st2, 0);
+            if (WIFEXITED(st2)) ret_status = WEXITSTATUS(st2);
+            else ret_status = 1;
         }
 
         free_segment(left_argv, left_in, left_out);
         free_segment(right_argv, right_in, right_out);
-        return 0;
+        return ret_status;
     }
 
     // Case 2: Single command (with optional <, >, or &)
@@ -279,11 +285,12 @@ int execute_command_line(char* cmdline) {
 
     // Foreground command without redirection: preserve exact original flow
     if (!background && infile == NULL && outfile == NULL) {
+        int ret_status = 0;
         if (!handle_builtin(argv)) {
-            execute(argv);
+            ret_status = execute(argv);
         }
         free_segment(argv, infile, outfile);
-        return 0;
+        return ret_status;
     }
 
     // Background command or command with redirection
@@ -291,7 +298,7 @@ int execute_command_line(char* cmdline) {
     if (cpid < 0) {
         perror("fork failed");
         free_segment(argv, infile, outfile);
-        return -1;
+        return 1;
     }
     if (cpid == 0) {
         apply_redirections(infile, outfile);
@@ -303,14 +310,18 @@ int execute_command_line(char* cmdline) {
         exit(1);
     }
 
+    int ret_status = 0;
     if (background) {
         add_job(cpid, job_cmd);
     } else {
-        waitpid(cpid, NULL, 0);
+        int status;
+        waitpid(cpid, &status, 0);
+        if (WIFEXITED(status)) ret_status = WEXITSTATUS(status);
+        else ret_status = 1;
     }
 
     free_segment(argv, infile, outfile);
-    return 0;
+    return ret_status;
 }
 
 // Split input line by ';' (outside quotes) and execute sequentially
@@ -339,4 +350,125 @@ void execute_chained_commands(char* cmdline) {
             }
         }
     }
+}
+
+// Helper: Trim leading and trailing whitespace in-place
+static char* trim_ws(char* s) {
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') s++;
+    int len = strlen(s);
+    while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t' || s[len - 1] == '\n' || s[len - 1] == '\r')) {
+        s[--len] = '\0';
+    }
+    return s;
+}
+
+// Helper: Check if a line starts with exact keyword ("if", "then", "else", "fi")
+static int is_keyword(const char* line, const char* kw) {
+    size_t klen = strlen(kw);
+    if (strncmp(line, kw, klen) != 0) return 0;
+    char next = line[klen];
+    return (next == '\0' || next == ' ' || next == '\t' || next == ';');
+}
+
+// Feature 7: Parse and execute multi-line if-then-else-fi structure
+int handle_if_block(char* first_line) {
+    char* p = first_line;
+    while (*p == ' ' || *p == '\t') p++;
+    if (!is_keyword(p, "if")) return 0;
+
+    char cond_cmd[MAX_LEN] = "";
+    char* then_cmds[MAX_BLOCK_LINES];
+    char* else_cmds[MAX_BLOCK_LINES];
+    int then_count = 0;
+    int else_count = 0;
+
+    // States: 0 = reading condition (waiting for 'then'), 1 = reading 'then' block, 2 = reading 'else' block
+    int state = 0;
+
+    // Extract condition after "if" on the first line
+    char* after_if = trim_ws(p + 2);
+    if (*after_if != '\0') {
+        strncpy(cond_cmd, after_if, MAX_LEN - 1);
+        cond_cmd[MAX_LEN - 1] = '\0';
+    }
+
+    // Read subsequent lines until 'fi'
+    while (1) {
+        char* line = readline("> ");
+        if (line == NULL) {
+            fprintf(stderr, "Syntax error: unexpected EOF while looking for matching `fi'\n");
+            for (int i = 0; i < then_count; i++) free(then_cmds[i]);
+            for (int i = 0; i < else_count; i++) free(else_cmds[i]);
+            return 1;
+        }
+
+        // Save each entered line to Readline history
+        char* trimmed = trim_ws(line);
+        if (*trimmed != '\0') {
+            add_history(line);
+        }
+
+        // Skip empty lines or comments
+        if (*trimmed == '\0' || *trimmed == '#') {
+            free(line);
+            continue;
+        }
+
+        if (is_keyword(trimmed, "then") && state == 0) {
+            state = 1;
+            char* rest = trim_ws(trimmed + 4);
+            if (*rest != '\0' && then_count < MAX_BLOCK_LINES) {
+                then_cmds[then_count++] = strdup(rest);
+            }
+        } else if (is_keyword(trimmed, "else") && state == 1) {
+            state = 2;
+            char* rest = trim_ws(trimmed + 4);
+            if (*rest != '\0' && else_count < MAX_BLOCK_LINES) {
+                else_cmds[else_count++] = strdup(rest);
+            }
+        } else if (is_keyword(trimmed, "fi") && (state == 1 || state == 2)) {
+            free(line);
+            break;
+        } else {
+            if (state == 0) {
+                if (cond_cmd[0] == '\0') {
+                    strncpy(cond_cmd, trimmed, MAX_LEN - 1);
+                    cond_cmd[MAX_LEN - 1] = '\0';
+                }
+            } else if (state == 1) {
+                if (then_count < MAX_BLOCK_LINES) {
+                    then_cmds[then_count++] = strdup(trimmed);
+                }
+            } else if (state == 2) {
+                if (else_count < MAX_BLOCK_LINES) {
+                    else_cmds[else_count++] = strdup(trimmed);
+                }
+            }
+        }
+        free(line);
+    }
+
+    if (cond_cmd[0] == '\0') {
+        fprintf(stderr, "Syntax error: missing condition in `if' statement\n");
+        for (int i = 0; i < then_count; i++) free(then_cmds[i]);
+        for (int i = 0; i < else_count; i++) free(else_cmds[i]);
+        return 1;
+    }
+
+    // Execute the condition command and inspect its exit status
+    int exit_status = execute_command_line(cond_cmd);
+
+    if (exit_status == 0) {
+        for (int i = 0; i < then_count; i++) {
+            execute_chained_commands(then_cmds[i]);
+        }
+    } else {
+        for (int i = 0; i < else_count; i++) {
+            execute_chained_commands(else_cmds[i]);
+        }
+    }
+
+    for (int i = 0; i < then_count; i++) free(then_cmds[i]);
+    for (int i = 0; i < else_count; i++) free(else_cmds[i]);
+    return 1;
 }

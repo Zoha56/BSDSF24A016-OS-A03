@@ -18,12 +18,14 @@
 #define PROMPT "FCIT> "
 #define HISTORY_SIZE 20
 #define MAX_JOBS 64
+#define MAX_BLOCK_LINES 64
 
 // Function prototypes
 char** tokenize(char* cmdline);
 int execute(char** arglist);
 int execute_command_line(char* cmdline);
 void execute_chained_commands(char* cmdline);
+int handle_if_block(char* first_line);
 int handle_builtin(char** arglist);
 void add_to_history(const char* cmd);
 void print_history(void);
